@@ -1,0 +1,201 @@
+---
+title: "Generates negative binomial data"
+output: html_notebook
+---
+
+```{r}
+library(ggplot2)
+library(colormap)
+library(cmdstanr)
+library(posterior)
+library(dplyr)
+```
+
+```{r}
+# we recommend running this is a fresh R session or restarting your current session
+#("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
+```
+
+
+```{r}
+# Installing to my cloud backup drive didn't work
+#install_cmdstan(dir = 'C:\\stan')
+#rebuild_cmdstan()
+
+# check everything is fine with the compilation toolchain
+check_cmdstan_toolchain()
+
+# if necessary, install cmdstan
+```
+
+```{r}
+cmdstan_path()
+```
+
+```{r}
+cmdstan_version()
+```
+
+
+Set up some default colours for use later.
+
+```{r}
+
+c_light <- c("#DCBCBC")
+c_light_highlight <- c("#C79999")
+c_mid <- c("#B97C7C")
+c_mid_highlight <- c("#A25050")
+c_dark <- c("#8F2727")
+c_dark_highlight <- c("#7C0000")
+
+nom_colors <- c("#DCBCBC", "#C79999", "#B97C7C", "#A25050", "#8F2727", "#7C0000")
+
+c_light_teal <- c("#6B8E8E")
+c_mid_teal <- c("#487575")
+c_dark_teal <- c("#1D4F4F")
+```
+
+# Generate the mean and overdispersion processes 
+
+We generate some data, where the mean and overdispersion vary over time.
+
+Both the mean and overdispersion are modelled using the exponent of a random walk process (since we want strictly positive values. We then plug these into a Stan model to generate some negative binomial count data. Since we use a Stan model to estimate the underlying process later, it makes sense to generate the negative binomial data using a Stan model, so that the parameterisation of the negative binomial doesn't change.
+
+```{r}
+set.seed(1)
+T = 100                 # length of time we observe the process over
+x = seq(1, T)           # 1,2,3...,T
+mu = exp(2 + cumsum(rnorm(T, 0, 0.05))) # exponentiated random walk
+phi = exp(cumsum(rnorm(T, 0, 0.15)))    # exponentiated random walk
+```
+
+## Mean process
+
+```{r}
+qplot(x, mu) + ggtitle("Mean over time") + xlab("Time")
+```
+
+# Overdispersion process
+
+```{r}
+qplot(x, phi) + ggtitle("phi over time") + xlab("Time")
+```
+
+# observations per time point
+
+We allow multiple observations of the negative binomial process at each time point. Each day, the number of observations is drawn from a poisson(10) distribution
+
+```{r}
+obs_each_day = rpois(T, 10)
+```
+
+```{r}
+qplot(1:T, obs_each_day) + 
+  ggtitle('Number of observations of the process made at each time point') +
+  xlab('Time')
+```
+
+We create a design matrix
+
+```{r}
+time_of_observation = rep(1:T, obs_each_day)
+X = model.matrix( ~ as.factor(time_of_observation) - 1) # design matrix
+N = length(time_of_observation) # total number of observations
+```
+
+We write a stan program that can generate the negative binomial data. This command will recompile if needed.
+
+```{r}
+generate_negative_binomial_process = cmdstan_model('../StanPrograms/SimNegBinProcess.stan')
+```
+
+Print the model code so you can see what it does. Should be straightforward to understand - the design matrix describes which observations occur on which day.
+
+```{r}
+generate_negative_binomial_process$print()
+```
+
+
+Set up a list of our inputs
+
+```{r}
+data_in = list(
+  mu = mu,
+  phi = phi,
+  T = T,
+  N = N,
+  X = X
+)
+```
+
+Run Stan to generate some data
+
+```{r}
+simulated_data = generate_negative_binomial_process$sample(
+  data = data_in,
+  fixed_param = TRUE,
+  chains = 1,
+  seed = 1
+)
+```
+
+Extract some outputs. Everything gets returned as a big dataframe 
+
+```{r}
+draws_df = as_draws_df(simulated_data$draws())
+
+draws_y_obs = draws_df %>%
+  select(starts_with('y_obs'))
+
+draws_y = draws_df %>%
+  select(starts_with('y['))
+```
+
+Inspect the first observation of this process. We will save this data, and later fit a model to it to try and estimate the mean and overdispersion process.
+
+# Observed data
+
+```{r}
+y_obs = as.numeric(draws_y_obs[1,])
+qplot(time_of_observation, y_obs, alpha = I(0.2)) +
+  ggtitle("Some simulated observations") +
+  xlab('Time') +
+  ylab('Count')
+```
+
+```{r}
+simulated_data = data.frame(time_of_observation, y_obs)
+```
+
+```{r}
+write.csv(simulated_data, file = '../Outputs/SimulatedNegBinData.csv')
+```
+
+# Credible intervals
+
+We plot the credible intervals from the neagtive binomial process defined by the mean and overdispersion process we randomly generated above.
+
+```{r}
+
+draws_y_matrix = as.matrix(draws_y)
+
+x_vals = 1:100
+
+probs = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+cred <- sapply(1:100,
+               function(n) quantile((draws_y_matrix[,n]), probs=probs))
+
+plot(1, type="n", main='Negative binomial process pdf',
+     xlab="x", ylab="f", xlim=c(min(1), max(100)), ylim = c(0, 40))
+
+polygon(c(x_vals, rev(x_vals)), c(cred[1,], rev(cred[9,])),
+        col = c_light, border = NA)
+polygon(c(x_vals, rev(x_vals)), c(cred[2,], rev(cred[8,])),
+        col = c_light_highlight, border = NA)
+polygon(c(x_vals, rev(x_vals)), c(cred[3,], rev(cred[7,])),
+        col = c_mid, border = NA)
+polygon(c(x_vals, rev(x_vals)), c(cred[4,], rev(cred[6,])),
+        col = c_mid_highlight, border = NA)
+lines(x_vals, cred[5,], col=c_dark, lwd=2)
+```
+

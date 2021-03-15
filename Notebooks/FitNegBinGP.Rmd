@@ -1,0 +1,256 @@
+---
+title: "Negbin GP Regression"
+output: html_notebook
+---
+
+```{r}
+library(cmdstanr)
+library(posterior)
+library(dplyr)
+library(colormap)
+library(ggplot2)
+library(bayesplot)
+```
+
+```{r}
+check_cmdstan_toolchain()
+```
+
+```{r}
+set_cmdstan_path("C:\\stan\\cmdstan-2.26.1")
+```
+
+```{r}
+cmdstan_path()
+```
+
+
+```{r}
+cmdstan_version()
+```
+
+Set up some colours
+
+```{r}
+c_light <- c("#DCBCBC")
+c_light_highlight <- c("#C79999")
+c_mid <- c("#B97C7C")
+c_mid_highlight <- c("#A25050")
+c_dark <- c("#8F2727")
+c_dark_highlight <- c("#7C0000")
+
+nom_colors <- c("#DCBCBC", "#C79999", "#B97C7C", "#A25050", "#8F2727", "#7C0000")
+
+c_light_teal <- c("#6B8E8E")
+c_mid_teal <- c("#487575")
+c_dark_teal <- c("#1D4F4F")
+```
+
+Read in the data we generated using SimulateNegBinData.R.
+
+```{r}
+data = read.csv('../Outputs/SimulatedNegBinData.csv')
+```
+
+Plot the data to see what we're working with
+
+```{r}
+ggplot(data = data, aes(x = time_of_observation, y = y_obs)) + 
+  geom_jitter(alpha = 0.3) +
+  ggtitle('Observed negative binomial process') + 
+  xlab('Time') + 
+  ylab('Count')
+```
+
+# Generate some gaussian processes
+
+Load in a stan model that can simulate a Gaussian process
+
+```{r}
+simulate_gaussian_process = cmdstan_model('../StanPrograms/SimGP.stan')
+```
+
+```{r}
+simulate_gaussian_process$print()
+```
+
+```{r}
+data_in = list(
+  T = 100,
+  x = 1:100,
+  rho = 2,
+  alpha = 1
+)
+
+simulated_gp = simulate_gaussian_process$sample(
+  data = data_in,
+  fixed_param = TRUE,
+  chains = 1,
+  seed = 1
+)
+```
+
+Extract the simulated data
+
+```{r}
+draws_df = as_draws_df(simulated_gp$draws())
+
+draws_f = draws_df %>%
+  select(starts_with('f['))
+
+draws_squared_f = draws_df %>%
+  select(starts_with('squared_f['))
+```
+
+Plot some observations of the Gaussian process
+
+```{r}
+qplot(1:100, as.numeric(draws_f[1,]), geom = 'line') +
+  ggtitle("Gaussian process draw") +
+  ylab('y') +
+  xlab('Time')
+```
+
+# fit a negative binomial with a gaussian process prior on the mean and overdispersion
+
+```{r}
+fit_negbin_gaussian_process_priors = cmdstan_model('../StanPrograms/fit_negbin_gaussian_process_priors.stan')
+```
+
+```{r}
+fit_negbin_gaussian_process_priors$print()
+```
+
+setup for passing data to stan
+
+```{r}
+x_obs = data$time_of_observation
+X = model.matrix( ~ as.factor(x_obs) - 1)
+
+data_in = list(
+  T = 100,
+  N = dim(data)[1],
+  X = X,
+  y_obs = data$y_obs,
+  x = 1:100
+)
+```
+
+Start running the model fit. This will probably print out a load of messages, this is expected. It's due to the nature of proposing highly constrained variables, such as covariance matrices (which we do a lot of). It should settle down once it starts mixing well, but is really annoying.
+
+```{r}
+gp_fit = fit_negbin_gaussian_process_priors$sample(
+  data = data_in,
+  seed = 1,
+  parallel_chains = 4
+)
+```
+
+```{r}
+
+```
+
+
+```{r}
+gp_fit_draws <- gp_fit$draws()
+summarise_draws(subset(gp_fit_draws,
+                       variable=c('mu_gp_mean',
+                                  'phi_gp_mean',
+                                  'rho_mu',
+                                  'alpha_mu',
+                                  'rho_phi',
+                                  'alpha_phi'),
+                       regex=TRUE))
+```
+
+
+
+
+```{r}
+launch_shinystan(gp_fit)
+
+samples = rstan::extract(simu)
+```
+
+```{r}
+y_obs = samples$y[5,]
+qplot(1:100, y_obs, alpha = I(0.2))
+```
+
+
+
+```{r}
+probs = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+cred <- sapply(1:100,
+               function(n) quantile((samples$y_predict[,n]), probs=probs))
+
+x_vals = data_in$x
+
+plot(1, type="n", main='credible intervals',
+     xlab="x", ylab="f", xlim=c(min(x_vals), max(x_vals)), ylim = c(0, 70))
+
+
+polygon(c(x_vals, rev(x_vals)), c(cred[1,], rev(cred[9,])),
+        col = c_light, border = NA)
+polygon(c(x_vals, rev(x_vals)), c(cred[2,], rev(cred[8,])),
+        col = c_light_highlight, border = NA)
+polygon(c(x_vals, rev(x_vals)), c(cred[3,], rev(cred[7,])),
+        col = c_mid, border = NA)
+polygon(c(x_vals, rev(x_vals)), c(cred[4,], rev(cred[6,])),
+        col = c_mid_highlight, border = NA)
+lines(x_vals, cred[5,], col=c_dark, lwd=2)
+```
+
+
+```{r}
+
+probs = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+cred <- sapply(1:100,
+               function(n) quantile(exp(samples$mu_predict[,n]), probs=probs))
+
+x_vals = data_in$x
+
+plot(1, type="n", main='credible intervals',
+     xlab="x", ylab="f", xlim=c(min(x_vals), max(x_vals)), ylim = c(-20, 20))
+
+
+polygon(c(x_vals, rev(x_vals)), c(cred[1,], rev(cred[9,])),
+        col = c_light, border = NA)
+polygon(c(x_vals, rev(x_vals)), c(cred[2,], rev(cred[8,])),
+        col = c_light_highlight, border = NA)
+polygon(c(x_vals, rev(x_vals)), c(cred[3,], rev(cred[7,])),
+        col = c_mid, border = NA)
+polygon(c(x_vals, rev(x_vals)), c(cred[4,], rev(cred[6,])),
+        col = c_mid_highlight, border = NA)
+lines(x_vals, cred[5,], col=c_dark, lwd=2)
+```
+
+```{r}
+gp_fit$cmdstan_diagnose()
+```
+
+
+```{r}
+
+probs = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+cred <- sapply(1:100,
+               function(n) quantile(exp(samples$phi_predict[,n]), probs=probs))
+
+x_vals = data_in$x
+
+plot(1, type="n", main='credible intervals',
+     xlab="x", ylab="f", xlim=c(min(x_vals), max(x_vals)), ylim = c(1, 7))
+
+
+polygon(c(x_vals, rev(x_vals)), c(cred[1,], rev(cred[9,])),
+        col = c_light, border = NA)
+polygon(c(x_vals, rev(x_vals)), c(cred[2,], rev(cred[8,])),
+        col = c_light_highlight, border = NA)
+polygon(c(x_vals, rev(x_vals)), c(cred[3,], rev(cred[7,])),
+        col = c_mid, border = NA)
+polygon(c(x_vals, rev(x_vals)), c(cred[4,], rev(cred[6,])),
+        col = c_mid_highlight, border = NA)
+lines(x_vals, cred[5,], col=c_dark, lwd=2)
+```
+```
+

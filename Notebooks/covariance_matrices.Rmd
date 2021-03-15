@@ -1,0 +1,43 @@
+---
+title: "covariance_matrix_pos_def"
+author: "Martyn Fyles"
+date: "13/03/2021"
+output: html_document
+---
+
+```{r}
+library(reshape2)
+library(ggplot2)
+library(matrixcalc)
+```
+
+
+```{r}
+gaussian_exp_quad_cov = function(x1, x2, alpha, rho){
+  return(alpha^2 * exp(-(x1 - x2)^2 / rho^2))
+} 
+```
+
+```{r}
+results = c()
+for(j in 1:20){
+  for(i in 1:20){
+    results = append(gaussian_exp_quad_cov(i, j, 1.5, 15), results)
+  }
+}
+covariance_matrix = matrix(results, nrow = 20, ncol = 20)
+
+longData<-melt(covariance_matrix)
+longData<-longData[longData$value!=0,]
+
+ggplot(longData, aes(x = Var2, y = Var1)) + 
+  geom_raster(aes(fill=value)) + 
+  scale_fill_gradient(low="grey90", high="red") +
+  labs(x="letters", y="LETTERS", title="Matrix") +
+  theme_bw()
+```
+
+```{r}
+gp_fit$cmdstan_diagnose()
+```
+
