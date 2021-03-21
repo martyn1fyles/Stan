@@ -12,7 +12,6 @@ TODO:
 * finish off the poisson implementation
 * redo plotting code in ggplot2. We switched to cmdstanr which returns samples in a tidyverse df anyway.
 * test removing the lower bound on the gaussian process means. I think they make the model a lot more stable, but unsure exactly.
-* Need to update the analysis for the fitted negative binomial processes
 
 # Installation notes
 * I switched to using cmdstanr, rstan was too unstable on my system and crashed after 50% of MCMC runs
