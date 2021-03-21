@@ -15,7 +15,7 @@ library(bayesplot)
 ```{r}
 check_cmdstan_toolchain()
 ```
-
+My cmdstanr isn't installed in a default area, this will be different for you - MF.
 ```{r}
 set_cmdstan_path("C:\\stan\\cmdstan-2.26.1")
 ```
@@ -86,7 +86,8 @@ simulated_gp = simulate_gaussian_process$sample(
   data = data_in,
   fixed_param = TRUE,
   chains = 1,
-  seed = 1
+  seed = 1,
+  show_messages = FALSE
 )
 ```
 
@@ -110,6 +111,14 @@ qplot(1:100, as.numeric(draws_f[1,]), geom = 'line') +
   ylab('y') +
   xlab('Time')
 ```
+
+```{r}
+qplot(1:100, as.numeric(draws_squared_f[1,]), geom = 'line') +
+  ggtitle("Gaussian process draw") +
+  ylab('y') +
+  xlab('Time')
+```
+
 
 # fit a negative binomial with a gaussian process prior on the mean and overdispersion
 
@@ -142,14 +151,12 @@ Start running the model fit. This will probably print out a load of messages, th
 gp_fit = fit_negbin_gaussian_process_priors$sample(
   data = data_in,
   seed = 1,
-  parallel_chains = 4
+  parallel_chains = 4,
+  show_messages = FALSE # uncomment to see messages complaining about proposed cov matrices that aren't positive definite
 )
 ```
 
-```{r}
-
-```
-
+Why is this so slow?
 
 ```{r}
 gp_fit_draws <- gp_fit$draws()
@@ -159,36 +166,45 @@ summarise_draws(subset(gp_fit_draws,
                                   'rho_mu',
                                   'alpha_mu',
                                   'rho_phi',
-                                  'alpha_phi'),
-                       regex=TRUE))
-```
-
-
-
-
-```{r}
-launch_shinystan(gp_fit)
-
-samples = rstan::extract(simu)
-```
-
-```{r}
-y_obs = samples$y[5,]
-qplot(1:100, y_obs, alpha = I(0.2))
+                                  'alpha_phi')))
 ```
 
 
 
 ```{r}
+gp_fit_draws_df = as_draws_df(gp_fit_draws)
+
+draws_y_predict = gp_fit_draws_df %>%
+  select(starts_with('y_predict'))
+
+draws_mu_predict = gp_fit_draws_df %>%
+  select(starts_with('mu_predict'))
+
+draws_phi_predict = gp_fit_draws_df %>%
+  select(starts_with('phi_predict'))
+```
+
+
+```{r}
+y_obs = as.numeric(draws_y_predict[3,])
+qplot(1:100, y_obs, alpha = I(0.2)) +
+  ggtitle("Some simulated observations") +
+  xlab('Time') +
+  ylab('Count')
+```
+
+
+```{r}
+draws_y_matrix = as.matrix(draws_y_predict)
+
+x_vals = 1:100
+
 probs = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
 cred <- sapply(1:100,
-               function(n) quantile((samples$y_predict[,n]), probs=probs))
+               function(n) quantile((draws_y_matrix[,n]), probs=probs))
 
-x_vals = data_in$x
-
-plot(1, type="n", main='credible intervals',
-     xlab="x", ylab="f", xlim=c(min(x_vals), max(x_vals)), ylim = c(0, 70))
-
+plot(1, type="n", main='Negative binomial process posterior pdf',
+     xlab="x", ylab="f", xlim=c(min(1), max(100)), ylim = c(0, 45))
 
 polygon(c(x_vals, rev(x_vals)), c(cred[1,], rev(cred[9,])),
         col = c_light, border = NA)
@@ -203,16 +219,16 @@ lines(x_vals, cred[5,], col=c_dark, lwd=2)
 
 
 ```{r}
+draws_mu_matrix = as.matrix(draws_mu_predict)
+
+x_vals = 1:100
 
 probs = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
 cred <- sapply(1:100,
-               function(n) quantile(exp(samples$mu_predict[,n]), probs=probs))
+               function(n) quantile((draws_mu_matrix[,n]), probs=probs))
 
-x_vals = data_in$x
-
-plot(1, type="n", main='credible intervals',
-     xlab="x", ylab="f", xlim=c(min(x_vals), max(x_vals)), ylim = c(-20, 20))
-
+plot(1, type="n", main='Mean process credible intervals',
+     xlab="x", ylab="f", xlim=c(min(1), max(100)), ylim = c(5, 20))
 
 polygon(c(x_vals, rev(x_vals)), c(cred[1,], rev(cred[9,])),
         col = c_light, border = NA)
@@ -224,33 +240,36 @@ polygon(c(x_vals, rev(x_vals)), c(cred[4,], rev(cred[6,])),
         col = c_mid_highlight, border = NA)
 lines(x_vals, cred[5,], col=c_dark, lwd=2)
 ```
+
+
+```{r}
+draws_phi_matrix = as.matrix(draws_phi_predict)
+
+x_vals = 1:100
+
+probs = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
+cred <- sapply(1:100,
+               function(n) quantile((draws_phi_matrix[,n]), probs=probs))
+
+plot(1, type="n", main='Overdispersion credible intervals',
+     xlab="x", ylab="f", xlim=c(min(1), max(100)), ylim = c(0, 5))
+
+polygon(c(x_vals, rev(x_vals)), c(cred[1,], rev(cred[9,])),
+        col = c_light, border = NA)
+polygon(c(x_vals, rev(x_vals)), c(cred[2,], rev(cred[8,])),
+        col = c_light_highlight, border = NA)
+polygon(c(x_vals, rev(x_vals)), c(cred[3,], rev(cred[7,])),
+        col = c_mid, border = NA)
+polygon(c(x_vals, rev(x_vals)), c(cred[4,], rev(cred[6,])),
+        col = c_mid_highlight, border = NA)
+lines(x_vals, cred[5,], col=c_dark, lwd=2)
+```
+
+extremely slow.
 
 ```{r}
 gp_fit$cmdstan_diagnose()
 ```
 
 
-```{r}
-
-probs = c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
-cred <- sapply(1:100,
-               function(n) quantile(exp(samples$phi_predict[,n]), probs=probs))
-
-x_vals = data_in$x
-
-plot(1, type="n", main='credible intervals',
-     xlab="x", ylab="f", xlim=c(min(x_vals), max(x_vals)), ylim = c(1, 7))
-
-
-polygon(c(x_vals, rev(x_vals)), c(cred[1,], rev(cred[9,])),
-        col = c_light, border = NA)
-polygon(c(x_vals, rev(x_vals)), c(cred[2,], rev(cred[8,])),
-        col = c_light_highlight, border = NA)
-polygon(c(x_vals, rev(x_vals)), c(cred[3,], rev(cred[7,])),
-        col = c_mid, border = NA)
-polygon(c(x_vals, rev(x_vals)), c(cred[4,], rev(cred[6,])),
-        col = c_mid_highlight, border = NA)
-lines(x_vals, cred[5,], col=c_dark, lwd=2)
-```
-```
 
