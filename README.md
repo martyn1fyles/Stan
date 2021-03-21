@@ -6,7 +6,7 @@ We use Gaussian process prior distributions on the mean and overdispersion.
 
 What's in the repo?
 * SimulateNegBinData.Rmd - generate some fake example data, where mean and overdipsersion are modelled using exponentiated random walks and a stan model.
-* FitNegBin.Rmd - implements a stan model to fit to the fake generates data using stan, and produces credible intervals etc
+* FitNegBin.Rmd - implements a stan model to fit to the fake generated data using stan, and produces credible intervals etc (needs updating to use cmdstanr)
 
 TODO:
 * finish off the poisson implementation
