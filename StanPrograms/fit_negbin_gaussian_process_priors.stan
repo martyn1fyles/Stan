@@ -96,5 +96,5 @@ generated quantities {
   vector[T] phi_predict = phi;
   
   // generate draws from the negative binomial
-  int y_predict[T] = neg_binomial_rng(mu, phi);
+  int y_predict[T] = neg_binomial_2_rng(mu, phi);
 }
